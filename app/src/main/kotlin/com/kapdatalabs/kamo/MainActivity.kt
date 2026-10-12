@@ -28,6 +28,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun bindPrinter() {
+        try {
+            // applicationContext est plus fiable que l'Activity pour le binding
+            InnerPrinterManager.getInstance().bindService(applicationContext, printerCallback)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,17 +73,13 @@ class MainActivity : Activity() {
         webView.loadUrl("file:///android_asset/index.html")
 
         // ── Connecter l'imprimante ─────────────────────────────────────────
-        try {
-            InnerPrinterManager.getInstance().bindService(this, printerCallback)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        bindPrinter()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         try {
-            InnerPrinterManager.getInstance().unBindService(this, printerCallback)
+            InnerPrinterManager.getInstance().unBindService(applicationContext, printerCallback)
         } catch (e: Exception) { /* ignore */ }
         webView.destroy()
     }
@@ -91,9 +96,12 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun printRaw(text: String) {
             val service = printerService ?: run {
+                // Tenter une reconnexion automatique
+                bindPrinter()
                 runOnUiThread {
                     Toast.makeText(this@MainActivity,
-                        "Imprimante non disponible", Toast.LENGTH_SHORT).show()
+                        "Connexion imprimante en cours, réessayez dans 2s",
+                        Toast.LENGTH_LONG).show()
                 }
                 return
             }
@@ -107,6 +115,19 @@ class MainActivity : Activity() {
                     Toast.makeText(this@MainActivity,
                         "Erreur impression: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
+            }
+        }
+
+        /**
+         * Tente de reconnecter l'imprimante depuis JS.
+         * Appelé depuis JS : window.SunmiPrint.reconnect()
+         */
+        @JavascriptInterface
+        fun reconnect() {
+            bindPrinter()
+            runOnUiThread {
+                Toast.makeText(this@MainActivity,
+                    "Reconnexion imprimante...", Toast.LENGTH_SHORT).show()
             }
         }
 
