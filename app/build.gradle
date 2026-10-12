@@ -18,7 +18,6 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            // pas de shrink pour garder les classes Sunmi accessibles
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
@@ -34,22 +33,9 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
-
-    // APK non signé pour sideloading USB — la signature se fait via GitHub Actions
-    signingConfigs {}
-}
-
-repositories {
-    // SDK Sunmi hébergé sur leur Maven
-    maven { url 'https://maven.sunmi.com/nexus/content/groups/public/' }
-    google()
-    mavenCentral()
 }
 
 dependencies {
-    // ── Sunmi Printer SDK ──────────────────────────────────────────────────
     implementation 'com.sunmi:printerx:1.0.18'
-
-    // ── Kotlin ────────────────────────────────────────────────────────────
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.22'
 }
