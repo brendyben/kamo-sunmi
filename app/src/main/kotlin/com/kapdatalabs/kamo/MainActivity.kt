@@ -3,41 +3,36 @@ package com.kapdatalabs.kamo
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.os.Bundle
+import android.os.RemoteException
 import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import com.sunmi.printerx.PrinterSdk
-import com.sunmi.printerx.SdkException
-import com.sunmi.printerx.api.PrinterApi
-import com.sunmi.printerx.enums.PrinterFormat
-import java.nio.charset.Charset
+import com.sunmi.peripheral.printer.InnerPrinterCallback
+import com.sunmi.peripheral.printer.InnerPrinterManager
+import com.sunmi.peripheral.printer.SunmiPrinterService
 
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
-    private var printerApi: PrinterApi? = null
+    private var printerService: SunmiPrinterService? = null
 
-    // ── Sunmi PrinterSdk initialisation ──────────────────────────────────────
-    private val printerListener = object : PrinterSdk.PrinterListen {
-        override fun onDefPrinter(printer: PrinterSdk.Printer?) {
-            printer?.let { p ->
-                try {
-                    printerApi = p.getApi(PrinterFormat.TEXT)
-                } catch (e: SdkException) {
-                    e.printStackTrace()
-                }
-            }
+    // ── Connexion à l'imprimante Sunmi ────────────────────────────────────────
+    private val printerCallback = object : InnerPrinterCallback() {
+        override fun onConnected(service: SunmiPrinterService?) {
+            printerService = service
         }
-        override fun onPrinters(printers: MutableList<PrinterSdk.Printer>?) {}
+        override fun onDisconnected() {
+            printerService = null
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Fullscreen sans barre de titre
+        // Plein écran sans barre de titre
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         window.decorView.systemUiVisibility = (
             android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -57,39 +52,30 @@ class MainActivity : Activity() {
             allowUniversalAccessFromFileURLs = true
             @Suppress("DEPRECATION")
             allowFileAccessFromFileURLs  = true
-            databaseEnabled              = true
             cacheMode                    = WebSettings.LOAD_DEFAULT
             textZoom                     = 100
         }
 
         // ── JS Bridge ──────────────────────────────────────────────────────
         webView.addJavascriptInterface(SunmiPrintBridge(), "SunmiPrint")
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun onReceivedError(
-                view: WebView?,
-                errorCode: Int,
-                description: String?,
-                failingUrl: String?
-            ) {
-                // silencieux — page locale, ne devrait pas échouer
-            }
-        }
+        webView.webViewClient = WebViewClient()
 
         // ── Charger l'app ──────────────────────────────────────────────────
         webView.loadUrl("file:///android_asset/index.html")
 
-        // ── Connecter l'imprimante Sunmi ───────────────────────────────────
+        // ── Connecter l'imprimante ─────────────────────────────────────────
         try {
-            PrinterSdk.getInstance().getPrinter(this, printerListener)
-        } catch (e: SdkException) {
+            InnerPrinterManager.getInstance().bindService(this, printerCallback)
+        } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        try { PrinterSdk.getInstance().destroy(this) } catch (e: Exception) { /* ignore */ }
+        try {
+            InnerPrinterManager.getInstance().unBindService(this, printerCallback)
+        } catch (e: Exception) { /* ignore */ }
         webView.destroy()
     }
 
@@ -104,33 +90,28 @@ class MainActivity : Activity() {
          */
         @JavascriptInterface
         fun printRaw(text: String) {
-            val api = printerApi ?: run {
-                runOnUiThread { Toast.makeText(this@MainActivity,
-                    "Imprimante non disponible", Toast.LENGTH_SHORT).show() }
+            val service = printerService ?: run {
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity,
+                        "Imprimante non disponible", Toast.LENGTH_SHORT).show()
+                }
                 return
             }
             try {
-                api.config()
-                    .initPrinter()
-                    .commit()
-                api.lineApi()
-                    .printText(text)
-                    .commit()
-                api.lineApi()
-                    .feedPaper(4)
-                    .commit()
-            } catch (e: Exception) {
+                service.printerInit(null)
+                service.printText(text, null)
+                service.lineWrap(4, null)
+            } catch (e: RemoteException) {
                 e.printStackTrace()
                 runOnUiThread {
                     Toast.makeText(this@MainActivity,
-                        "Erreur impression : ${e.message}", Toast.LENGTH_SHORT).show()
+                        "Erreur impression: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
 
         /**
          * Affiche un toast Android depuis JS.
-         * Appelé depuis JS : window.SunmiPrint.toast(message)
          */
         @JavascriptInterface
         fun toast(message: String) {
@@ -141,9 +122,8 @@ class MainActivity : Activity() {
 
         /**
          * Vérifie si l'imprimante est prête.
-         * Appelé depuis JS : window.SunmiPrint.isAvailable() → boolean
          */
         @JavascriptInterface
-        fun isAvailable(): Boolean = printerApi != null
+        fun isAvailable(): Boolean = printerService != null
     }
 }
